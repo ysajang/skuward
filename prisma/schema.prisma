@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Shopify Session (앱 인증 - 템플릿 필수)
+// ============================================
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+// ============================================
+// Supplier (공급업체)
+// ============================================
+model Supplier {
+  id          String   @id @default(cuid())
+  shop        String
+  name        String
+  email       String?
+  phone       String?
+  leadTimeDays Int     @default(7)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([shop])
+}
+
+// ============================================
+// Purchase Order (발주서)
+// ============================================
+enum POStatus {
+  DRAFT
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id              String    @id @default(cuid())
+  shop            String
+  poNumber        String
+  status          POStatus  @default(DRAFT)
+  supplierId      String
+  notes           String?
+  orderedAt       DateTime?
+  expectedAt      DateTime?
+  receivedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  supplier        Supplier        @relation(fields: [supplierId], references: [id])
+  lineItems       POLineItem[]
+
+  @@unique([shop, poNumber])
+  @@index([shop])
+  @@index([shop, status])
+  @@index([supplierId])
+}
+
+// ============================================
+// PO Line Item (발주 항목)
+// ============================================
+model POLineItem {
+  id                  String   @id @default(cuid())
+  purchaseOrderId     String
+  shopifyVariantId    String
+  shopifyProductId    String
+  title               String
+  variantTitle        String?
+  sku                 String?
+  quantityOrdered     Int
+  quantityReceived    Int      @default(0)
+  costPerUnit         Decimal  @db.Decimal(12, 2)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  purchaseOrder       PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([shopifyVariantId])
+}
+
+// ============================================
+// Reorder Rule (재주문 알림 설정)
+// ============================================
+model ReorderRule {
+  id                  String   @id @default(cuid())
+  shop                String
+  shopifyVariantId    String
+  shopifyProductId    String
+  title               String
+  variantTitle        String?
+  sku                 String?
+  reorderPoint        Int
+  reorderQty          Int?
+  lastNotifiedAt      DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([shop, shopifyVariantId])
+  @@index([shop])
+}
+
+// ============================================
+// Cost Tracking (원가 추적)
+// ============================================
+model CostRecord {
+  id                  String   @id @default(cuid())
+  shop                String
+  shopifyVariantId    String
+  shopifyProductId    String
+  costPerUnit         Decimal  @db.Decimal(12, 2)
+  source              String   @default("manual")
+  createdAt           DateTime @default(now())
+
+  @@index([shop, shopifyVariantId])
+  @@index([createdAt])
+}
+
+// ============================================
+// Billing (구독 상태 추적)
+// ============================================
+enum PlanType {
+  FREE
+  STARTER
+  PRO
+}
+
+model ShopPlan {
+  id                    String   @id @default(cuid())
+  shop                  String   @unique
+  plan                  PlanType @default(FREE)
+  shopifyChargeId       String?
+  activatedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
