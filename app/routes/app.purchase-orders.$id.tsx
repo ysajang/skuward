@@ -24,7 +24,7 @@ import {
   Divider,
   Box,
 } from "@shopify/polaris";
-import { ResourcePicker } from "@shopify/app-bridge-react";
+import { useAppBridge } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -255,18 +255,28 @@ export default function PurchaseOrderDetailPage() {
       costPerUnit: parseFloat(li.costPerUnit),
     })),
   );
-  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const shopify = useAppBridge();
 
   const supplierOptions = [
     { label: "Select a supplier", value: "" },
     ...suppliers.map((s: any) => ({ label: s.name, value: s.id })),
   ];
 
-  const handleProductsSelected = useCallback(
-    (selection: any) => {
+  const handleAddProducts = useCallback(async () => {
+    try {
+      const selection = await shopify.resourcePicker({
+        type: "product",
+        multiple: true,
+        selectionIds: [],
+        action: "select",
+      });
+
+      if (!selection || selection.length === 0) return;
+
       const newItems: LineItemDraft[] = [];
 
-      for (const product of selection.selection) {
+      for (const product of selection) {
         for (const variant of product.variants) {
           const exists = lineItems.some(
             (li) => li.shopifyVariantId === String(variant.id),
@@ -286,10 +296,10 @@ export default function PurchaseOrderDetailPage() {
       }
 
       setLineItems((prev) => [...prev, ...newItems]);
-      setPickerOpen(false);
-    },
-    [lineItems],
-  );
+    } catch {
+      // User cancelled the picker
+    }
+  }, [shopify, lineItems]);
 
   const updateLineItem = useCallback(
     (index: number, field: keyof LineItemDraft, value: string | number) => {
@@ -431,7 +441,7 @@ export default function PurchaseOrderDetailPage() {
                   Products
                 </Text>
                 {isDraft && (
-                  <Button onClick={() => setPickerOpen(true)}>
+                  <Button onClick={handleAddProducts}>
                     Add products
                   </Button>
                 )}
@@ -544,16 +554,6 @@ export default function PurchaseOrderDetailPage() {
         )}
       </Layout>
 
-      {pickerOpen && (
-        <ResourcePicker
-          resourceType="Product"
-          open={pickerOpen}
-          onSelection={handleProductsSelected}
-          onCancel={() => setPickerOpen(false)}
-          showVariants
-          allowMultiple
-        />
-      )}
     </Page>
   );
 }
