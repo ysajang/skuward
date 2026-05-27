@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, Link } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -52,10 +52,8 @@ export default function DashboardPage() {
     totalPOs,
     draftPOs,
     orderedPOs,
-    reorderRuleCount,
     recentPOs,
   } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
 
   return (
     <Page title="SKUward Dashboard">
@@ -111,7 +109,7 @@ export default function DashboardPage() {
               title="Get started"
               action={{
                 content: "Add your first supplier",
-                onAction: () => navigate("/app/suppliers/new"),
+                url: "/app/suppliers/new",
               }}
               tone="info"
             >
@@ -137,14 +135,9 @@ export default function DashboardPage() {
                 <BlockStack gap="300">
                   {recentPOs.map((po: any) => (
                     <Box key={po.id}>
-                      <Button
-                        variant="plain"
-                        onClick={() =>
-                          navigate(`/app/purchase-orders/${po.id}`)
-                        }
-                      >
+                      <Link to={`/app/purchase-orders/${po.id}`}>
                         {po.poNumber}
-                      </Button>
+                      </Link>
                       {" — "}
                       {po.supplier.name} · {po.status.replace("_", " ")} ·{" "}
                       {new Date(po.createdAt).toLocaleDateString()}
@@ -162,19 +155,17 @@ export default function DashboardPage() {
               <Text as="h2" variant="headingMd">
                 Quick Actions
               </Text>
-              <Button
-                variant="primary"
-                fullWidth
-                onClick={() => navigate("/app/purchase-orders/new")}
-              >
-                Create Purchase Order
-              </Button>
-              <Button fullWidth onClick={() => navigate("/app/suppliers/new")}>
-                Add Supplier
-              </Button>
-              <Button fullWidth onClick={() => navigate("/app/reorder-rules")}>
-                Manage Reorder Rules
-              </Button>
+              <Link to="/app/purchase-orders/new">
+                <Button variant="primary" fullWidth>
+                  Create Purchase Order
+                </Button>
+              </Link>
+              <Link to="/app/suppliers/new">
+                <Button fullWidth>Add Supplier</Button>
+              </Link>
+              <Link to="/app/reorder-rules">
+                <Button fullWidth>Manage Reorder Rules</Button>
+              </Link>
             </BlockStack>
           </Card>
         </Layout.Section>

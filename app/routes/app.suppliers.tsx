@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, Link } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -9,7 +9,6 @@ import {
   Text,
   Badge,
   EmptyState,
-  Button,
 } from "@shopify/polaris";
 
 import { authenticate } from "../shopify.server";
@@ -36,7 +35,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function SuppliersPage() {
   const { suppliers, supplierCount } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
 
   if (suppliers.length === 0) {
     return (
@@ -44,7 +42,7 @@ export default function SuppliersPage() {
         title="Suppliers"
         primaryAction={{
           content: "Add supplier",
-          onAction: () => navigate("/app/suppliers/new"),
+          url: "/app/suppliers/new",
         }}
       >
         <Layout>
@@ -54,7 +52,7 @@ export default function SuppliersPage() {
                 heading="Manage your suppliers"
                 action={{
                   content: "Add supplier",
-                  onAction: () => navigate("/app/suppliers/new"),
+                  url: "/app/suppliers/new",
                 }}
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
@@ -75,12 +73,13 @@ export default function SuppliersPage() {
       id={supplier.id}
       key={supplier.id}
       position={index}
-      onClick={() => navigate(`/app/suppliers/${supplier.id}`)}
     >
       <IndexTable.Cell>
-        <Text variant="bodyMd" fontWeight="bold" as="span">
-          {supplier.name}
-        </Text>
+        <Link to={`/app/suppliers/${supplier.id}`}>
+          <Text variant="bodyMd" fontWeight="bold" as="span">
+            {supplier.name}
+          </Text>
+        </Link>
       </IndexTable.Cell>
       <IndexTable.Cell>{supplier.email || "—"}</IndexTable.Cell>
       <IndexTable.Cell>{supplier.phone || "—"}</IndexTable.Cell>
@@ -99,7 +98,7 @@ export default function SuppliersPage() {
       subtitle={`${supplierCount} supplier${supplierCount !== 1 ? "s" : ""}`}
       primaryAction={{
         content: "Add supplier",
-        onAction: () => navigate("/app/suppliers/new"),
+        url: "/app/suppliers/new",
       }}
     >
       <Layout>

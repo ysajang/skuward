@@ -4,7 +4,6 @@ import {
   useActionData,
   useLoaderData,
   useSubmit,
-  useNavigate,
 } from "@remix-run/react";
 import { useState, useCallback } from "react";
 import {
@@ -230,7 +229,6 @@ export default function PurchaseOrderDetailPage() {
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
-  const navigate = useNavigate();
 
   const isNew = !purchaseOrder;
   const isDraft = !purchaseOrder || purchaseOrder.status === "DRAFT";
@@ -353,7 +351,7 @@ export default function PurchaseOrderDetailPage() {
 
   return (
     <Page
-      backAction={{ onAction: () => navigate("/app/purchase-orders") }}
+      backAction={{ url: "/app/purchase-orders" }}
       title={isNew ? "Create Purchase Order" : purchaseOrder.poNumber}
       subtitle={
         purchaseOrder

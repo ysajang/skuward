@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useSubmit, useNavigate } from "@remix-run/react";
+import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
 import { useState, useCallback } from "react";
 import {
   Page,
@@ -116,7 +116,6 @@ export default function SupplierDetailPage() {
   const { supplier } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
-  const navigate = useNavigate();
 
   const isNew = !supplier;
 
@@ -150,7 +149,7 @@ export default function SupplierDetailPage() {
 
   return (
     <Page
-      backAction={{ onAction: () => navigate("/app/suppliers") }}
+      backAction={{ url: "/app/suppliers" }}
       title={isNew ? "Add supplier" : supplier.name}
     >
       <Layout>

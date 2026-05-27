@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, Link } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -29,16 +29,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const url = new URL(request.url);
-  const statusFilter = url.searchParams.get("status");
-
-  const where: any = { shop };
-  if (statusFilter && statusFilter !== "ALL") {
-    where.status = statusFilter;
-  }
-
   const purchaseOrders = await prisma.purchaseOrder.findMany({
-    where,
+    where: { shop },
     orderBy: { createdAt: "desc" },
     include: {
       supplier: { select: { name: true } },
@@ -54,7 +46,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function PurchaseOrdersPage() {
   const { purchaseOrders, totalCount } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
 
   const handleStatusFilterChange = useCallback(
@@ -77,7 +68,7 @@ export default function PurchaseOrdersPage() {
         title="Purchase Orders"
         primaryAction={{
           content: "Create PO",
-          onAction: () => navigate("/app/purchase-orders/new"),
+          url: "/app/purchase-orders/new",
         }}
       >
         <Layout>
@@ -87,7 +78,7 @@ export default function PurchaseOrdersPage() {
                 heading="Create your first purchase order"
                 action={{
                   content: "Create PO",
-                  onAction: () => navigate("/app/purchase-orders/new"),
+                  url: "/app/purchase-orders/new",
                 }}
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
@@ -111,12 +102,13 @@ export default function PurchaseOrdersPage() {
         id={po.id}
         key={po.id}
         position={index}
-        onClick={() => navigate(`/app/purchase-orders/${po.id}`)}
       >
         <IndexTable.Cell>
-          <Text variant="bodyMd" fontWeight="bold" as="span">
-            {po.poNumber}
-          </Text>
+          <Link to={`/app/purchase-orders/${po.id}`}>
+            <Text variant="bodyMd" fontWeight="bold" as="span">
+              {po.poNumber}
+            </Text>
+          </Link>
         </IndexTable.Cell>
         <IndexTable.Cell>{po.supplier.name}</IndexTable.Cell>
         <IndexTable.Cell>
@@ -174,7 +166,7 @@ export default function PurchaseOrdersPage() {
       subtitle={`${totalCount} total`}
       primaryAction={{
         content: "Create PO",
-        onAction: () => navigate("/app/purchase-orders/new"),
+        url: "/app/purchase-orders/new",
       }}
     >
       <Layout>
