@@ -4,6 +4,7 @@ import {
   useActionData,
   useLoaderData,
   useSubmit,
+  useNavigation,
 } from "@remix-run/react";
 import { useState, useCallback } from "react";
 import {
@@ -21,14 +22,20 @@ import {
   BlockStack,
   InlineStack,
   Divider,
-  Box,
+  Badge,
+  ProgressBar,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { sanitizeString, parseIntSafe, parseDecimalSafe } from "../utils/validation";
+import {
+  sanitizeString,
+  parseIntSafe,
+  parseDecimalSafe,
+} from "../utils/validation";
 import { generatePONumber } from "../utils/po-number";
+import { adjustInventoryOnReceive } from "../utils/shopify-inventory.server";
 
 interface LineItemDraft {
   shopifyVariantId: string;
@@ -80,13 +87,203 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  // Delete PO
+  // =============================================
+  // Intent: receive (입고 처리)
+  // =============================================
+  if (intent === "receive") {
+    const poId = params.id;
+    if (!poId || poId === "new") {
+      return json({ errors: { form: "Invalid PO" } }, { status: 400 });
+    }
+
+    // Parse receiving quantities from form
+    const receivingDataJson = formData.get("receivingData");
+    let receivingData: Array<{
+      lineItemId: string;
+      quantityToReceive: number;
+    }> = [];
+
+    try {
+      receivingData = JSON.parse(String(receivingDataJson || "[]"));
+    } catch {
+      return json(
+        { errors: { form: "Invalid receiving data" } },
+        { status: 400 },
+      );
+    }
+
+    // Validate: at least one item with quantity > 0
+    const hasQuantity = receivingData.some(
+      (item) => item.quantityToReceive > 0,
+    );
+    if (!hasQuantity) {
+      return json(
+        { errors: { form: "Enter at least one quantity to receive" } },
+        { status: 400 },
+      );
+    }
+
+    // Load PO with line items for validation
+    const po = await prisma.purchaseOrder.findFirst({
+      where: { id: poId, shop },
+      include: { lineItems: true },
+    });
+
+    if (!po) {
+      return json(
+        { errors: { form: "Purchase order not found" } },
+        { status: 404 },
+      );
+    }
+
+    if (po.status !== "ORDERED" && po.status !== "PARTIALLY_RECEIVED") {
+      return json(
+        {
+          errors: {
+            form: `Cannot receive items for a PO with status: ${po.status}`,
+          },
+        },
+        { status: 400 },
+      );
+    }
+
+    // Validate quantities don't exceed remaining
+    const validationErrors: string[] = [];
+    const adjustments: Array<{
+      lineItemId: string;
+      variantId: string;
+      deltaQuantity: number;
+      newQuantityReceived: number;
+    }> = [];
+
+    for (const item of receivingData) {
+      if (item.quantityToReceive <= 0) continue;
+
+      const lineItem = po.lineItems.find((li) => li.id === item.lineItemId);
+      if (!lineItem) {
+        validationErrors.push(`Line item ${item.lineItemId} not found`);
+        continue;
+      }
+
+      const remaining =
+        lineItem.quantityOrdered - lineItem.quantityReceived;
+      if (item.quantityToReceive > remaining) {
+        validationErrors.push(
+          `${lineItem.title}: receiving ${item.quantityToReceive} exceeds remaining ${remaining}`,
+        );
+        continue;
+      }
+
+      adjustments.push({
+        lineItemId: lineItem.id,
+        variantId: lineItem.shopifyVariantId,
+        deltaQuantity: item.quantityToReceive,
+        newQuantityReceived:
+          lineItem.quantityReceived + item.quantityToReceive,
+      });
+    }
+
+    if (validationErrors.length > 0) {
+      return json(
+        { errors: { form: validationErrors.join("; ") } },
+        { status: 400 },
+      );
+    }
+
+    // 1) Adjust Shopify inventory
+    const inventoryResult = await adjustInventoryOnReceive(
+      admin,
+      adjustments.map((a) => ({
+        variantId: a.variantId,
+        deltaQuantity: a.deltaQuantity,
+      })),
+    );
+
+    if (!inventoryResult.success) {
+      return json(
+        {
+          errors: {
+            form: `Shopify inventory update failed: ${inventoryResult.errors.join("; ")}`,
+          },
+        },
+        { status: 500 },
+      );
+    }
+
+    // 2) Update DB: line item quantities + PO status + cost records
+    await prisma.$transaction(async (tx) => {
+      for (const adj of adjustments) {
+        await tx.pOLineItem.update({
+          where: { id: adj.lineItemId },
+          data: { quantityReceived: adj.newQuantityReceived },
+        });
+      }
+
+      // Refresh line items to determine PO status
+      const updatedLineItems = await tx.pOLineItem.findMany({
+        where: { purchaseOrderId: poId },
+      });
+
+      const allReceived = updatedLineItems.every(
+        (li) => li.quantityReceived >= li.quantityOrdered,
+      );
+      const someReceived = updatedLineItems.some(
+        (li) => li.quantityReceived > 0,
+      );
+
+      let newStatus: "RECEIVED" | "PARTIALLY_RECEIVED" | "ORDERED";
+      if (allReceived) {
+        newStatus = "RECEIVED";
+      } else if (someReceived) {
+        newStatus = "PARTIALLY_RECEIVED";
+      } else {
+        newStatus = "ORDERED";
+      }
+
+      const updateData: any = { status: newStatus };
+      if (newStatus === "RECEIVED") {
+        updateData.receivedAt = new Date();
+      }
+
+      await tx.purchaseOrder.update({
+        where: { id: poId },
+        data: updateData,
+      });
+
+      // 3) Create CostRecord for each received item
+      for (const adj of adjustments) {
+        const lineItem = po.lineItems.find(
+          (li) => li.id === adj.lineItemId,
+        );
+        if (!lineItem) continue;
+
+        const costPerUnit = Number(lineItem.costPerUnit);
+        if (costPerUnit > 0) {
+          await tx.costRecord.create({
+            data: {
+              shop,
+              shopifyVariantId: lineItem.shopifyVariantId,
+              shopifyProductId: lineItem.shopifyProductId,
+              costPerUnit: costPerUnit,
+              source: "po_receiving",
+            },
+          });
+        }
+      }
+    });
+
+    return json({ errors: null, received: true });
+  }
+
+  // =============================================
+  // Intent: delete
+  // =============================================
   if (intent === "delete") {
     const poId = params.id;
     if (!poId || poId === "new") {
@@ -97,7 +294,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect("/app/purchase-orders");
   }
 
-  // Update status
+  // =============================================
+  // Intent: updateStatus
+  // =============================================
   if (intent === "updateStatus") {
     const poId = params.id;
     const newStatus = formData.get("status") as string;
@@ -132,7 +331,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return json({ errors: null, saved: true });
   }
 
-  // Create or update PO
+  // =============================================
+  // Intent: save (create/update PO)
+  // =============================================
   const supplierId = sanitizeString(formData.get("supplierId"), 100);
   const notes = sanitizeString(formData.get("notes"), 2000);
   const expectedAt = formData.get("expectedAt")
@@ -229,9 +430,14 @@ export default function PurchaseOrderDetailPage() {
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
+  const navigation = useNavigation();
 
   const isNew = !purchaseOrder;
   const isDraft = !purchaseOrder || purchaseOrder.status === "DRAFT";
+  const isReceivable =
+    purchaseOrder?.status === "ORDERED" ||
+    purchaseOrder?.status === "PARTIALLY_RECEIVED";
+  const isSubmitting = navigation.state === "submitting";
 
   const [supplierId, setSupplierId] = useState(
     purchaseOrder?.supplierId || "",
@@ -253,6 +459,22 @@ export default function PurchaseOrderDetailPage() {
       costPerUnit: parseFloat(li.costPerUnit),
     })),
   );
+
+  // Receiving state: track how many to receive per line item
+  const [receivingQtys, setReceivingQtys] = useState<Record<string, number>>(
+    () => {
+      const initial: Record<string, number> = {};
+      if (isReceivable) {
+        for (const li of existingLineItems as any[]) {
+          const remaining = li.quantityOrdered - li.quantityReceived;
+          initial[li.id] = remaining; // Default to remaining qty
+        }
+      }
+      return initial;
+    },
+  );
+
+  const [showReceivingForm, setShowReceivingForm] = useState(false);
 
   const shopify = useAppBridge();
 
@@ -284,7 +506,8 @@ export default function PurchaseOrderDetailPage() {
               shopifyVariantId: String(variant.id),
               shopifyProductId: String(product.id),
               title: product.title,
-              variantTitle: variant.title === "Default Title" ? "" : variant.title,
+              variantTitle:
+                variant.title === "Default Title" ? "" : variant.title,
               sku: variant.sku || "",
               quantity: 1,
               costPerUnit: 0,
@@ -342,22 +565,73 @@ export default function PurchaseOrderDetailPage() {
     submit(formData, { method: "post" });
   }, [submit]);
 
+  const handleReceive = useCallback(() => {
+    const receivingData = Object.entries(receivingQtys)
+      .filter(([_, qty]) => qty > 0)
+      .map(([lineItemId, quantityToReceive]) => ({
+        lineItemId,
+        quantityToReceive,
+      }));
+
+    const formData = new FormData();
+    formData.append("intent", "receive");
+    formData.append("receivingData", JSON.stringify(receivingData));
+    submit(formData, { method: "post" });
+  }, [receivingQtys, submit]);
+
+  const updateReceivingQty = useCallback(
+    (lineItemId: string, value: number) => {
+      setReceivingQtys((prev) => ({ ...prev, [lineItemId]: value }));
+    },
+    [],
+  );
+
+  const fillAllRemaining = useCallback(() => {
+    const updated: Record<string, number> = {};
+    for (const li of existingLineItems as any[]) {
+      updated[li.id] = li.quantityOrdered - li.quantityReceived;
+    }
+    setReceivingQtys(updated);
+  }, [existingLineItems]);
+
+  const clearAllReceiving = useCallback(() => {
+    const updated: Record<string, number> = {};
+    for (const li of existingLineItems as any[]) {
+      updated[li.id] = 0;
+    }
+    setReceivingQtys(updated);
+  }, [existingLineItems]);
+
   const totalCost = lineItems.reduce(
     (sum, item) => sum + item.quantity * item.costPerUnit,
     0,
   );
 
-  const errors = actionData?.errors || {};
+  const errors = (actionData as any)?.errors || {};
+
+  // Status badge tone mapping
+  const statusBadge = (status: string) => {
+    switch (status) {
+      case "DRAFT":
+        return <Badge>Draft</Badge>;
+      case "ORDERED":
+        return <Badge tone="info">Ordered</Badge>;
+      case "PARTIALLY_RECEIVED":
+        return <Badge tone="warning">Partially Received</Badge>;
+      case "RECEIVED":
+        return <Badge tone="success">Received</Badge>;
+      case "CANCELLED":
+        return <Badge tone="critical">Cancelled</Badge>;
+      default:
+        return <Badge>{status}</Badge>;
+    }
+  };
 
   return (
     <Page
       backAction={{ url: "/app/purchase-orders" }}
       title={isNew ? "Create Purchase Order" : purchaseOrder.poNumber}
-      subtitle={
-        purchaseOrder
-          ? `Status: ${purchaseOrder.status.replace("_", " ")}`
-          : undefined
-      }
+      titleMetadata={purchaseOrder ? statusBadge(purchaseOrder.status) : undefined}
     >
       <Layout>
         {errors.form && (
@@ -365,9 +639,16 @@ export default function PurchaseOrderDetailPage() {
             <Banner tone="critical">{errors.form}</Banner>
           </Layout.Section>
         )}
-        {actionData?.saved && (
+        {(actionData as any)?.saved && (
           <Layout.Section>
             <Banner tone="success">Purchase order saved.</Banner>
+          </Layout.Section>
+        )}
+        {(actionData as any)?.received && (
+          <Layout.Section>
+            <Banner tone="success">
+              Items received successfully! Shopify inventory has been updated.
+            </Banner>
           </Layout.Section>
         )}
 
@@ -375,30 +656,177 @@ export default function PurchaseOrderDetailPage() {
         {purchaseOrder && purchaseOrder.status !== "CANCELLED" && (
           <Layout.Section>
             <Card>
-              <InlineStack gap="300">
+              <InlineStack gap="300" blockAlign="center">
                 {purchaseOrder.status === "DRAFT" && (
-                  <Button onClick={() => handleStatusChange("ORDERED")}>
+                  <Button
+                    onClick={() => handleStatusChange("ORDERED")}
+                    loading={isSubmitting}
+                  >
                     Mark as Ordered
                   </Button>
                 )}
-                {(purchaseOrder.status === "ORDERED" ||
-                  purchaseOrder.status === "PARTIALLY_RECEIVED") && (
-                  <Button onClick={() => handleStatusChange("RECEIVED")}>
-                    Mark as Received
+                {isReceivable && !showReceivingForm && (
+                  <Button
+                    variant="primary"
+                    onClick={() => setShowReceivingForm(true)}
+                  >
+                    Receive Items
+                  </Button>
+                )}
+                {isReceivable && showReceivingForm && (
+                  <Button
+                    onClick={() => setShowReceivingForm(false)}
+                  >
+                    Cancel Receiving
                   </Button>
                 )}
                 {purchaseOrder.status !== "RECEIVED" && (
                   <Button
                     tone="critical"
                     onClick={() => handleStatusChange("CANCELLED")}
+                    loading={isSubmitting}
                   >
-                    Cancel
+                    Cancel PO
                   </Button>
                 )}
               </InlineStack>
             </Card>
           </Layout.Section>
         )}
+
+        {/* ============================================ */}
+        {/* Receiving Form — shown when "Receive Items" clicked */}
+        {/* ============================================ */}
+        {isReceivable && showReceivingForm && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">
+                    Receive Inventory
+                  </Text>
+                  <InlineStack gap="200">
+                    <Button size="slim" onClick={fillAllRemaining}>
+                      Fill all remaining
+                    </Button>
+                    <Button size="slim" onClick={clearAllReceiving}>
+                      Clear all
+                    </Button>
+                  </InlineStack>
+                </InlineStack>
+
+                <DataTable
+                  columnContentTypes={[
+                    "text",
+                    "text",
+                    "numeric",
+                    "numeric",
+                    "numeric",
+                    "numeric",
+                  ]}
+                  headings={[
+                    "Product",
+                    "SKU",
+                    "Ordered",
+                    "Already Received",
+                    "Remaining",
+                    "Receive Now",
+                  ]}
+                  rows={(existingLineItems as any[]).map((li) => {
+                    const remaining =
+                      li.quantityOrdered - li.quantityReceived;
+                    const currentQty = receivingQtys[li.id] || 0;
+                    return [
+                      `${li.title}${li.variantTitle ? ` - ${li.variantTitle}` : ""}`,
+                      li.sku || "—",
+                      String(li.quantityOrdered),
+                      String(li.quantityReceived),
+                      String(remaining),
+                      remaining > 0 ? (
+                        <TextField
+                          label=""
+                          labelHidden
+                          type="number"
+                          value={String(currentQty)}
+                          onChange={(val) => {
+                            const parsed = parseInt(val) || 0;
+                            const clamped = Math.min(
+                              Math.max(0, parsed),
+                              remaining,
+                            );
+                            updateReceivingQty(li.id, clamped);
+                          }}
+                          autoComplete="off"
+                          min={0}
+                          max={remaining}
+                        />
+                      ) : (
+                        <Badge tone="success">Complete</Badge>
+                      ),
+                    ];
+                  })}
+                />
+
+                <InlineStack align="end">
+                  <Button
+                    variant="primary"
+                    onClick={handleReceive}
+                    loading={isSubmitting}
+                    disabled={
+                      !Object.values(receivingQtys).some((q) => q > 0)
+                    }
+                  >
+                    Confirm & Update Shopify Inventory
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
+
+        {/* ============================================ */}
+        {/* Receiving Progress (for ORDERED/PARTIALLY_RECEIVED) */}
+        {/* ============================================ */}
+        {purchaseOrder &&
+          (purchaseOrder.status === "ORDERED" ||
+            purchaseOrder.status === "PARTIALLY_RECEIVED" ||
+            purchaseOrder.status === "RECEIVED") && (
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">
+                    Receiving Progress
+                  </Text>
+                  {(existingLineItems as any[]).map((li) => {
+                    const progress =
+                      li.quantityOrdered > 0
+                        ? Math.round(
+                            (li.quantityReceived / li.quantityOrdered) * 100,
+                          )
+                        : 0;
+                    return (
+                      <BlockStack key={li.id} gap="100">
+                        <InlineStack align="space-between">
+                          <Text as="span" variant="bodyMd">
+                            {li.title}
+                            {li.variantTitle ? ` - ${li.variantTitle}` : ""}
+                          </Text>
+                          <Text as="span" variant="bodyMd" tone="subdued">
+                            {li.quantityReceived} / {li.quantityOrdered}
+                          </Text>
+                        </InlineStack>
+                        <ProgressBar
+                          progress={progress}
+                          tone={progress >= 100 ? "success" : "highlight"}
+                          size="small"
+                        />
+                      </BlockStack>
+                    );
+                  })}
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          )}
 
         {/* Main Form */}
         <Layout.Section>
@@ -439,9 +867,7 @@ export default function PurchaseOrderDetailPage() {
                   Products
                 </Text>
                 {isDraft && (
-                  <Button onClick={handleAddProducts}>
-                    Add products
-                  </Button>
+                  <Button onClick={handleAddProducts}>Add products</Button>
                 )}
               </InlineStack>
 
@@ -522,7 +948,14 @@ export default function PurchaseOrderDetailPage() {
                       ""
                     ),
                   ])}
-                  totals={["", "", "", "Total", `$${totalCost.toFixed(2)}`, ""]}
+                  totals={[
+                    "",
+                    "",
+                    "",
+                    "Total",
+                    `$${totalCost.toFixed(2)}`,
+                    "",
+                  ]}
                 />
               )}
             </BlockStack>
@@ -535,6 +968,7 @@ export default function PurchaseOrderDetailPage() {
               primaryAction={{
                 content: "Save",
                 onAction: handleSave,
+                loading: isSubmitting,
               }}
               secondaryActions={
                 isNew
@@ -551,7 +985,6 @@ export default function PurchaseOrderDetailPage() {
           </Layout.Section>
         )}
       </Layout>
-
     </Page>
   );
 }
