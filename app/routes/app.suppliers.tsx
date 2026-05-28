@@ -9,6 +9,8 @@ import {
   Text,
   Badge,
   EmptyState,
+  InlineStack,
+  Button,
 } from "@shopify/polaris";
 
 import { authenticate } from "../shopify.server";
@@ -38,22 +40,19 @@ export default function SuppliersPage() {
 
   if (suppliers.length === 0) {
     return (
-      <Page
-        title="Suppliers"
-        primaryAction={{
-          content: "Add supplier",
-          url: "/app/suppliers/new",
-        }}
-      >
+      <Page title="Suppliers">
         <Layout>
+          <Layout.Section>
+            <InlineStack align="end">
+              <Link to="/app/suppliers/new">
+                <Button variant="primary">Add supplier</Button>
+              </Link>
+            </InlineStack>
+          </Layout.Section>
           <Layout.Section>
             <Card>
               <EmptyState
                 heading="Manage your suppliers"
-                action={{
-                  content: "Add supplier",
-                  url: "/app/suppliers/new",
-                }}
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
                 <p>
@@ -96,12 +95,15 @@ export default function SuppliersPage() {
     <Page
       title="Suppliers"
       subtitle={`${supplierCount} supplier${supplierCount !== 1 ? "s" : ""}`}
-      primaryAction={{
-        content: "Add supplier",
-        url: "/app/suppliers/new",
-      }}
     >
       <Layout>
+        <Layout.Section>
+          <InlineStack align="end">
+            <Link to="/app/suppliers/new">
+              <Button variant="primary">Add supplier</Button>
+            </Link>
+          </InlineStack>
+        </Layout.Section>
         <Layout.Section>
           <Card padding="0">
             <IndexTable

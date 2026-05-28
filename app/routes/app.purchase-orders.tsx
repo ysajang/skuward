@@ -11,6 +11,8 @@ import {
   EmptyState,
   Filters,
   ChoiceList,
+  InlineStack,
+  Button,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 
@@ -64,22 +66,19 @@ export default function PurchaseOrdersPage() {
 
   if (purchaseOrders.length === 0) {
     return (
-      <Page
-        title="Purchase Orders"
-        primaryAction={{
-          content: "Create PO",
-          url: "/app/purchase-orders/new",
-        }}
-      >
+      <Page title="Purchase Orders">
         <Layout>
+          <Layout.Section>
+            <InlineStack align="end">
+              <Link to="/app/purchase-orders/new">
+                <Button variant="primary">Create PO</Button>
+              </Link>
+            </InlineStack>
+          </Layout.Section>
           <Layout.Section>
             <Card>
               <EmptyState
                 heading="Create your first purchase order"
-                action={{
-                  content: "Create PO",
-                  url: "/app/purchase-orders/new",
-                }}
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
               >
                 <p>
@@ -164,12 +163,15 @@ export default function PurchaseOrdersPage() {
     <Page
       title="Purchase Orders"
       subtitle={`${totalCount} total`}
-      primaryAction={{
-        content: "Create PO",
-        url: "/app/purchase-orders/new",
-      }}
     >
       <Layout>
+        <Layout.Section>
+          <InlineStack align="end">
+            <Link to="/app/purchase-orders/new">
+              <Button variant="primary">Create PO</Button>
+            </Link>
+          </InlineStack>
+        </Layout.Section>
         <Layout.Section>
           <Card padding="0">
             <IndexTable
