@@ -3,7 +3,7 @@
  * Handles inventory adjustments when receiving PO line items
  */
 
-interface InventoryItemInfo {
+interface VariantInventoryInfo {
   inventoryItemId: string;
   locationId: string;
 }
@@ -14,18 +14,39 @@ interface AdjustmentResult {
 }
 
 /**
- * Get inventoryItemId for a variant by querying Shopify GraphQL
+ * Ensure the variantGid has the full Shopify GID prefix
+ * Resource picker may return numeric IDs or full GIDs
  */
-export async function getInventoryItemId(
+function ensureVariantGid(variantId: string): string {
+  if (variantId.startsWith("gid://")) return variantId;
+  return `gid://shopify/ProductVariant/${variantId}`;
+}
+
+/**
+ * Get inventoryItemId AND locationId for a variant in a single query
+ * by traversing variant -> inventoryItem -> inventoryLevels -> location
+ *
+ * This avoids needing the root `locations` query (which requires read_locations scope)
+ */
+async function getVariantInventoryInfo(
   admin: any,
   variantGid: string,
-): Promise<string | null> {
+): Promise<VariantInventoryInfo | null> {
   const response = await admin.graphql(
     `#graphql
-    query GetVariantInventoryItem($id: ID!) {
+    query GetVariantInventory($id: ID!) {
       productVariant(id: $id) {
         inventoryItem {
           id
+          inventoryLevels(first: 1) {
+            edges {
+              node {
+                location {
+                  id
+                }
+              }
+            }
+          }
         }
       }
     }`,
@@ -33,48 +54,16 @@ export async function getInventoryItemId(
   );
 
   const data = await response.json();
-  return data?.data?.productVariant?.inventoryItem?.id || null;
-}
+  const inventoryItem = data?.data?.productVariant?.inventoryItem;
+  if (!inventoryItem?.id) return null;
 
-/**
- * Get the shop's primary location ID
- */
-export async function getShopPrimaryLocationId(
-  admin: any,
-): Promise<string | null> {
-  const response = await admin.graphql(
-    `#graphql
-    query GetLocations {
-      locations(first: 1, includeLegacy: true, includeInactive: false) {
-        edges {
-          node {
-            id
-            name
-            isActive
-            isPrimary
-          }
-        }
-      }
-    }`,
-  );
+  const firstLevel = inventoryItem.inventoryLevels?.edges?.[0]?.node;
+  if (!firstLevel?.location?.id) return null;
 
-  const data = await response.json();
-  const locations = data?.data?.locations?.edges || [];
-
-  // Return primary location or first active location
-  const primary = locations.find((e: any) => e.node.isPrimary);
-  if (primary) return primary.node.id;
-
-  return locations.length > 0 ? locations[0].node.id : null;
-}
-
-/**
- * Ensure the variantGid has the full Shopify GID prefix
- * Resource picker may return numeric IDs or full GIDs
- */
-export function ensureVariantGid(variantId: string): string {
-  if (variantId.startsWith("gid://")) return variantId;
-  return `gid://shopify/ProductVariant/${variantId}`;
+  return {
+    inventoryItemId: inventoryItem.id,
+    locationId: firstLevel.location.id,
+  };
 }
 
 /**
@@ -92,13 +81,7 @@ export async function adjustInventoryOnReceive(
 ): Promise<AdjustmentResult> {
   const errors: string[] = [];
 
-  // Get the primary location
-  const locationId = await getShopPrimaryLocationId(admin);
-  if (!locationId) {
-    return { success: false, errors: ["Could not find shop location"] };
-  }
-
-  // Build changes array — we need inventoryItemId for each variant
+  // Build changes array — get inventoryItemId + locationId per variant
   const changes: Array<{
     delta: number;
     inventoryItemId: string;
@@ -109,19 +92,19 @@ export async function adjustInventoryOnReceive(
     if (adj.deltaQuantity <= 0) continue;
 
     const variantGid = ensureVariantGid(adj.variantId);
-    const inventoryItemId = await getInventoryItemId(admin, variantGid);
+    const info = await getVariantInventoryInfo(admin, variantGid);
 
-    if (!inventoryItemId) {
+    if (!info) {
       errors.push(
-        `Could not find inventory item for variant ${adj.variantId}`,
+        `Could not find inventory info for variant ${adj.variantId}`,
       );
       continue;
     }
 
     changes.push({
       delta: adj.deltaQuantity,
-      inventoryItemId,
-      locationId,
+      inventoryItemId: info.inventoryItemId,
+      locationId: info.locationId,
     });
   }
 
