@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, Link } from "@remix-run/react";
+import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -15,6 +15,9 @@ import {
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getShopPlan } from "../utils/billing.server";
+import { getPlanLimits, canCreateSupplier } from "../utils/plan-limits";
+import { UpgradeBanner } from "../components/UpgradeBanner";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -32,22 +35,70 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const supplierCount = suppliers.length;
 
-  return json({ suppliers, supplierCount });
+  const plan = await getShopPlan(shop);
+  const limits = getPlanLimits(plan);
+  const canCreate = canCreateSupplier(plan, supplierCount);
+  const unlimited = limits.maxSuppliers === Infinity;
+
+  return json({
+    suppliers,
+    supplierCount,
+    plan,
+    maxSuppliers: unlimited ? null : limits.maxSuppliers,
+    unlimited,
+    canCreate,
+  });
 };
 
 export default function SuppliersPage() {
-  const { suppliers, supplierCount } = useLoaderData<typeof loader>();
+  const {
+    suppliers,
+    supplierCount,
+    maxSuppliers,
+    unlimited,
+    canCreate,
+  } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const showLimitBanner =
+    searchParams.get("limit") === "supplier" || !canCreate;
+  const dismissBanner = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("limit");
+    setSearchParams(next, { replace: true });
+  };
+
+  const limitBanner = showLimitBanner ? (
+    <UpgradeBanner
+      resource="suppliers"
+      message={
+        unlimited
+          ? ""
+          : `You've added ${supplierCount} of ${maxSuppliers} suppliers allowed on your current plan.`
+      }
+      onDismiss={dismissBanner}
+    />
+  ) : null;
+
+  const createButton = canCreate ? (
+    <Link to="/app/suppliers/new">
+      <Button variant="primary">Add supplier</Button>
+    </Link>
+  ) : (
+    <Link to="/app/settings">
+      <Button variant="primary">Upgrade to add more</Button>
+    </Link>
+  );
 
   if (suppliers.length === 0) {
     return (
       <Page title="Suppliers">
         <Layout>
+          {limitBanner ? (
+            <Layout.Section>{limitBanner}</Layout.Section>
+          ) : null}
           <Layout.Section>
-            <InlineStack align="end">
-              <Link to="/app/suppliers/new">
-                <Button variant="primary">Add supplier</Button>
-              </Link>
-            </InlineStack>
+            <InlineStack align="end">{createButton}</InlineStack>
           </Layout.Section>
           <Layout.Section>
             <Card>
@@ -94,15 +145,16 @@ export default function SuppliersPage() {
   return (
     <Page
       title="Suppliers"
-      subtitle={`${supplierCount} supplier${supplierCount !== 1 ? "s" : ""}`}
+      subtitle={
+        unlimited
+          ? `${supplierCount} supplier${supplierCount !== 1 ? "s" : ""}`
+          : `${supplierCount}/${maxSuppliers} suppliers`
+      }
     >
       <Layout>
+        {limitBanner ? <Layout.Section>{limitBanner}</Layout.Section> : null}
         <Layout.Section>
-          <InlineStack align="end">
-            <Link to="/app/suppliers/new">
-              <Button variant="primary">Add supplier</Button>
-            </Link>
-          </InlineStack>
+          <InlineStack align="end">{createButton}</InlineStack>
         </Layout.Section>
         <Layout.Section>
           <Card padding="0">

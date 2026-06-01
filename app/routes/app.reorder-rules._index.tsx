@@ -28,6 +28,10 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { parseIntSafe } from "../utils/validation";
 import { getVariantsCurrentStock } from "../utils/shopify-inventory.server";
+import { getShopPlan } from "../utils/billing.server";
+import { getPlanLimits } from "../utils/plan-limits";
+import { countNetNew } from "../utils/net-new";
+import { UpgradeBanner } from "../components/UpgradeBanner";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -60,7 +64,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     };
   });
 
-  return json({ rules: rulesWithStock });
+  const plan = await getShopPlan(shop);
+  const limit = getPlanLimits(plan).maxReorderRules;
+  const unlimited = limit === Infinity;
+  const atLimit = !unlimited && rules.length >= limit;
+
+  return json({
+    rules: rulesWithStock,
+    plan,
+    maxReorderRules: unlimited ? null : limit,
+    unlimited,
+    atLimit,
+    ruleCount: rules.length,
+  });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -104,6 +120,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { errors: { form: "No products selected" } },
         { status: 400 },
       );
+    }
+
+    // Plan gating: only net-new variants count toward the limit (existing rules
+    // are upserts/updates). Block at creation time only; existing rules remain
+    // editable/deletable even if a downgrade put the shop over its limit.
+    const plan = await getShopPlan(shop);
+    const limit = getPlanLimits(plan).maxReorderRules;
+    if (limit !== Infinity) {
+      const existing = await prisma.reorderRule.findMany({
+        where: { shop },
+        select: { shopifyVariantId: true },
+      });
+      const existingIds = new Set(existing.map((r) => r.shopifyVariantId));
+      const netNew = countNetNew(
+        variants.map((v) => v.shopifyVariantId),
+        existingIds,
+      );
+      if (existing.length + netNew > limit) {
+        return json({ errors: null, limit: true }, { status: 200 });
+      }
     }
 
     // Upsert each — skip if a rule already exists for that variant
@@ -162,7 +198,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ReorderRulesPage() {
-  const { rules } = useLoaderData<typeof loader>();
+  const { rules, atLimit, unlimited, maxReorderRules, ruleCount } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
@@ -253,22 +290,34 @@ export default function ReorderRulesPage() {
   );
 
   const errors = (actionData as any)?.errors || {};
+  const hitLimit = atLimit || (actionData as any)?.limit === true;
   const lowStockCount = rules.filter((r) => r.belowThreshold).length;
+
+  const addAction = hitLimit
+    ? { content: "Upgrade to add more", url: "/app/settings" }
+    : { content: "Add products", onAction: handleAddProducts };
+
+  const limitBanner = hitLimit ? (
+    <Layout.Section>
+      <UpgradeBanner
+        resource="reorder rules"
+        message={
+          unlimited
+            ? ""
+            : `You've set ${ruleCount} of ${maxReorderRules} reorder rules allowed on your current plan.`
+        }
+      />
+    </Layout.Section>
+  ) : null;
 
   return (
     <Page
       title="Reorder Rules"
       subtitle="Set minimum stock levels and get alerted when inventory runs low"
-      primaryAction={
-        rules.length > 0
-          ? {
-              content: "Add products",
-              onAction: handleAddProducts,
-            }
-          : undefined
-      }
+      primaryAction={rules.length > 0 ? addAction : undefined}
     >
       <Layout>
+        {limitBanner}
         {errors.form && (
           <Layout.Section>
             <Banner tone="critical">{errors.form}</Banner>

@@ -16,6 +16,8 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sanitizeString, isValidEmail, parseIntSafe } from "../utils/validation";
+import { getShopPlan } from "../utils/billing.server";
+import { canCreateSupplier } from "../utils/plan-limits";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -100,6 +102,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const supplierId = params.id;
 
   if (supplierId === "new") {
+    // Plan gating: enforce supplier count at creation time only. Existing
+    // suppliers stay viewable/editable even if a downgrade exceeds the limit.
+    const plan = await getShopPlan(shop);
+    const supplierCount = await prisma.supplier.count({ where: { shop } });
+    if (!canCreateSupplier(plan, supplierCount)) {
+      return redirect("/app/suppliers?limit=supplier");
+    }
     const supplier = await prisma.supplier.create({ data });
     return redirect(`/app/suppliers/${supplier.id}`);
   }
