@@ -67,6 +67,78 @@ async function getVariantInventoryInfo(
 }
 
 /**
+ * Get the selling price (and title/sku metadata) for a list of variants.
+ * Returns a map of variantId -> { price, title, variantTitle, sku }.
+ *
+ * Batched via GraphQL aliases (50 per request).
+ */
+export async function getVariantsPriceInfo(
+  admin: any,
+  variantIds: string[],
+): Promise<
+  Record<
+    string,
+    { price: number; title: string; variantTitle: string; sku: string }
+  >
+> {
+  const result: Record<
+    string,
+    { price: number; title: string; variantTitle: string; sku: string }
+  > = {};
+  if (variantIds.length === 0) return result;
+
+  const CHUNK_SIZE = 50;
+  const chunks: string[][] = [];
+  for (let i = 0; i < variantIds.length; i += CHUNK_SIZE) {
+    chunks.push(variantIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  for (const chunk of chunks) {
+    const aliasMap: Record<string, string> = {};
+    const fields = chunk
+      .map((variantId, idx) => {
+        const alias = `v${idx}`;
+        aliasMap[alias] = variantId;
+        const gid = ensureVariantGid(variantId);
+        return `${alias}: productVariant(id: "${gid}") {
+          price
+          title
+          sku
+          product { title }
+        }`;
+      })
+      .join("\n");
+
+    const query = `#graphql
+      query GetVariantsPrice {
+        ${fields}
+      }`;
+
+    try {
+      const response = await admin.graphql(query);
+      const data = await response.json();
+      const root = data?.data || {};
+
+      for (const [alias, variantId] of Object.entries(aliasMap)) {
+        const v = root[alias];
+        if (!v) continue;
+        const price = parseFloat(v.price);
+        result[variantId] = {
+          price: isNaN(price) ? 0 : price,
+          title: v.product?.title || "",
+          variantTitle: v.title === "Default Title" ? "" : v.title || "",
+          sku: v.sku || "",
+        };
+      }
+    } catch {
+      // skip chunk on error
+    }
+  }
+
+  return result;
+}
+
+/**
  * Get current available stock (summed across all locations) for a list of variants.
  * Returns a map of variantGid -> available quantity (number).
  *
