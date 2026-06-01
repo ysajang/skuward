@@ -14,10 +14,16 @@ interface BillingCheckResult {
   appSubscriptions: { name: string; id: string }[];
 }
 
+/**
+ * Structural supertype of the SDK billing context's `check`. The SDK types
+ * `plans` as `(keyof Config['billing'])[]`, which TS narrows to `never[]` at
+ * generic boundaries like this one; accepting `readonly string[]` keeps the
+ * real billing object assignable here while we cast plan names at the call.
+ */
 interface BillingLike {
   check: (opts: {
-    plans: string[];
-    isTest: boolean;
+    plans?: readonly string[];
+    isTest?: boolean;
   }) => Promise<BillingCheckResult>;
 }
 

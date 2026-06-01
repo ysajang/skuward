@@ -18,7 +18,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Cancellations/declines fall back to FREE automatically. Failures here must
   // not break app load, so we swallow and keep the last-known plan.
   try {
-    await syncShopPlan(billing, session.shop, isDevStore(session.shop));
+    // SDK billing context's generic plan typing doesn't structurally match our
+    // minimal BillingLike; cast at this single boundary. syncShopPlan only calls
+    // .check and is runtime-verified.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await syncShopPlan(billing as any, session.shop, isDevStore(session.shop));
   } catch (error) {
     console.error("[billing] syncShopPlan failed:", error);
   }

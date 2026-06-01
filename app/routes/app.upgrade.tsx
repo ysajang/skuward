@@ -32,10 +32,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   //
   // billing.request returns Promise<never>: it throws the redirect to Shopify's
   // confirmation page itself. Do NOT wrap in try/catch (would swallow it).
+  // The SDK types `plan` as keyof the billing config; that generic resolves to
+  // `never` at this call site (known SDK inference limitation), so we cast at
+  // this single boundary. Runtime is verified working (Starter/Pro live tests).
   await billing.request({
-    plan: plan as BillingPlanName,
+    plan,
     isTest: isDevStore(session.shop),
-  });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
 
   // Unreachable in practice (request throws), but satisfies the type checker.
   return null;
