@@ -11,15 +11,29 @@ import {
   Badge,
   Box,
   Banner,
+  BlockStack,
+  InlineStack,
+  List,
 } from "@shopify/polaris";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getVariantsPriceInfo } from "../utils/shopify-inventory.server";
+import { getShopPlan } from "../utils/billing.server";
+import { canAccessCOGS } from "../utils/plan-limits";
+import { UpgradeBanner } from "../components/UpgradeBanner";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Plan gating: COGS is a paid feature. For locked (Free) shops, skip the
+  // cost/price computation entirely (avoids unnecessary Shopify API calls) and
+  // return a locked flag — the page shows a value preview + upgrade CTA.
+  const plan = await getShopPlan(shop);
+  if (!canAccessCOGS(plan)) {
+    return json({ locked: true as const, rows: [] });
+  }
 
   // Get the latest cost record per variant.
   // Fetch recent records ordered by createdAt desc, then dedupe by variant.
@@ -79,7 +93,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return a.marginPct - b.marginPct;
   });
 
-  return json({ rows });
+  return json({ locked: false as const, rows });
 };
 
 function formatCurrency(n: number | null): string {
@@ -88,7 +102,70 @@ function formatCurrency(n: number | null): string {
 }
 
 export default function CogsPage() {
-  const { rows } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+
+  if (data.locked) {
+    return (
+      <Page
+        title="Cost & Margins"
+        subtitle="Track cost of goods, selling price, and profit margin per product"
+      >
+        <Layout>
+          <Layout.Section>
+            <UpgradeBanner
+              resource="cost & margin tracking"
+              message="Cost & Margins is available on Starter and Pro. Upgrade to see your cost per unit, selling price, and profit margin for every product — recorded automatically when you receive purchase orders."
+            />
+          </Layout.Section>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  What you'll unlock
+                </Text>
+                <List type="bullet">
+                  <List.Item>
+                    Cost per unit recorded automatically on every PO receipt
+                  </List.Item>
+                  <List.Item>
+                    Selling price pulled live from your Shopify catalog
+                  </List.Item>
+                  <List.Item>
+                    Profit margin and margin % per product, worst margins first
+                  </List.Item>
+                  <List.Item>
+                    Alerts for products selling below a healthy margin
+                  </List.Item>
+                </List>
+                <Box
+                  background="bg-surface-secondary"
+                  padding="400"
+                  borderRadius="200"
+                >
+                  <BlockStack gap="200">
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      Preview
+                    </Text>
+                    <InlineStack align="space-between">
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        Example product
+                      </Text>
+                      <Badge tone="success">42%</Badge>
+                    </InlineStack>
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      Cost $5.80 · Price $9.99 · Margin $4.19
+                    </Text>
+                  </BlockStack>
+                </Box>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    );
+  }
+
+  const { rows } = data;
 
   const lowMarginCount = rows.filter(
     (r) => r.marginPct != null && r.marginPct < 20,
