@@ -67,6 +67,92 @@ async function getVariantInventoryInfo(
 }
 
 /**
+ * Get current available stock (summed across all locations) for a list of variants.
+ * Returns a map of variantGid -> available quantity (number).
+ *
+ * Uses GraphQL aliases to batch multiple variants into a single request.
+ * Variants whose inventory isn't tracked return null (excluded from the map).
+ */
+export async function getVariantsCurrentStock(
+  admin: any,
+  variantIds: string[],
+): Promise<Record<string, number>> {
+  const result: Record<string, number> = {};
+  if (variantIds.length === 0) return result;
+
+  // Shopify caps query complexity; batch in chunks of 50 variants
+  const CHUNK_SIZE = 50;
+  const chunks: string[][] = [];
+  for (let i = 0; i < variantIds.length; i += CHUNK_SIZE) {
+    chunks.push(variantIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  for (const chunk of chunks) {
+    // Build aliased query: v0: productVariant(id: "...") { ... }
+    const aliasMap: Record<string, string> = {}; // alias -> original variantId
+    const fields = chunk
+      .map((variantId, idx) => {
+        const alias = `v${idx}`;
+        aliasMap[alias] = variantId;
+        const gid = ensureVariantGid(variantId);
+        return `${alias}: productVariant(id: "${gid}") {
+          inventoryItem {
+            tracked
+            inventoryLevels(first: 20) {
+              edges {
+                node {
+                  quantities(names: ["available"]) {
+                    name
+                    quantity
+                  }
+                }
+              }
+            }
+          }
+        }`;
+      })
+      .join("\n");
+
+    const query = `#graphql
+      query GetVariantsStock {
+        ${fields}
+      }`;
+
+    try {
+      const response = await admin.graphql(query);
+      const data = await response.json();
+      const root = data?.data || {};
+
+      for (const [alias, variantId] of Object.entries(aliasMap)) {
+        const variant = root[alias];
+        const invItem = variant?.inventoryItem;
+        if (!invItem) continue;
+
+        // If not tracked, skip (no meaningful stock number)
+        if (invItem.tracked === false) continue;
+
+        const edges = invItem.inventoryLevels?.edges || [];
+        let total = 0;
+        for (const edge of edges) {
+          const quantities = edge?.node?.quantities || [];
+          const availableEntry = quantities.find(
+            (q: any) => q.name === "available",
+          );
+          if (availableEntry && typeof availableEntry.quantity === "number") {
+            total += availableEntry.quantity;
+          }
+        }
+        result[variantId] = total;
+      }
+    } catch {
+      // On error for a chunk, skip — caller treats missing entries as "unknown"
+    }
+  }
+
+  return result;
+}
+
+/**
  * Adjust inventory quantities in Shopify for received PO items
  *
  * Uses inventoryAdjustQuantities mutation with delta (increment)
