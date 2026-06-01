@@ -5,7 +5,6 @@ import {
   BILLING_PLANS,
   planNameToPlanType,
   resolvePlanFromSubscriptions,
-  buildReturnUrl,
   isDevStore,
 } from "./billing-plans";
 
@@ -63,13 +62,3 @@ describe("isDevStore", () => {
   });
 });
 
-describe("buildReturnUrl", () => {
-  it("builds admin app deep-link when handle present", () => {
-    expect(buildReturnUrl("acme.myshopify.com", "skuward")).toBe(
-      "https://admin.shopify.com/store/acme/apps/skuward",
-    );
-  });
-  it("falls back to /app when handle missing", () => {
-    expect(buildReturnUrl("acme.myshopify.com")).toBe("/app");
-  });
-});
