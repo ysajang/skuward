@@ -6,11 +6,21 @@ import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
+import { syncShopPlan, isDevStore } from "../utils/billing.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
+
+  // Reconcile local ShopPlan with Shopify's source of truth on every app load.
+  // Cancellations/declines fall back to FREE automatically. Failures here must
+  // not break app load, so we swallow and keep the last-known plan.
+  try {
+    await syncShopPlan(billing, session.shop, isDevStore(session.shop));
+  } catch (error) {
+    console.error("[billing] syncShopPlan failed:", error);
+  }
 
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };

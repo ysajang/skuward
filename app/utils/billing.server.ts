@@ -157,3 +157,22 @@ export async function getShopPlan(shop: string): Promise<PlanType> {
 export function isDevStore(shop: string): boolean {
   return shop === "skuward-dev.myshopify.com";
 }
+
+/**
+ * Build the post-approval returnUrl. Shopify redirects the merchant here after
+ * they approve/decline the charge. We point at the app's admin deep-link so the
+ * embedded session is restored cleanly (a raw app URL drops the session and
+ * forces re-auth — see shopify-app-js#476). Re-entering /app re-runs the loader,
+ * which calls syncShopPlan to persist the new charge.
+ *
+ * Requires SHOPIFY_APP_HANDLE. Falls back to the embedded app root if unset.
+ */
+export function buildReturnUrl(shop: string, appHandle?: string): string {
+  const storeHandle = shop.replace(".myshopify.com", "");
+  if (appHandle) {
+    return `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}`;
+  }
+  // Fallback: relative app root (SDK resolves against appUrl). Less robust for
+  // session restoration, but avoids a hard crash if the handle is missing.
+  return "/app";
+}

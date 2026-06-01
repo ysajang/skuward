@@ -5,6 +5,8 @@ import {
   BILLING_PLANS,
   planNameToPlanType,
   resolvePlanFromSubscriptions,
+  buildReturnUrl,
+  isDevStore,
 } from "./billing.server";
 
 describe("planNameToPlanType", () => {
@@ -51,5 +53,23 @@ describe("resolvePlanFromSubscriptions", () => {
     expect(
       resolvePlanFromSubscriptions([{ name: "Legacy", id: "gid://9" }]),
     ).toEqual({ plan: "FREE", chargeId: null });
+  });
+});
+
+describe("isDevStore", () => {
+  it("true for skuward-dev, false otherwise", () => {
+    expect(isDevStore("skuward-dev.myshopify.com")).toBe(true);
+    expect(isDevStore("realstore.myshopify.com")).toBe(false);
+  });
+});
+
+describe("buildReturnUrl", () => {
+  it("builds admin app deep-link when handle present", () => {
+    expect(buildReturnUrl("acme.myshopify.com", "skuward")).toBe(
+      "https://admin.shopify.com/store/acme/apps/skuward",
+    );
+  });
+  it("falls back to /app when handle missing", () => {
+    expect(buildReturnUrl("acme.myshopify.com")).toBe("/app");
   });
 });
