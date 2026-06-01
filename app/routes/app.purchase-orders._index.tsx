@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, Link } from "@remix-run/react";
+import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -18,6 +18,10 @@ import { useState, useCallback } from "react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getShopPlan } from "../utils/billing.server";
+import { getPlanLimits, canCreatePO } from "../utils/plan-limits";
+import { monthRange } from "../utils/month-range";
+import { UpgradeBanner } from "../components/UpgradeBanner";
 
 const STATUS_BADGE_MAP: Record<string, { tone: any; label: string }> = {
   DRAFT: { tone: undefined, label: "Draft" },
@@ -43,12 +47,66 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const totalCount = await prisma.purchaseOrder.count({ where: { shop } });
 
-  return json({ purchaseOrders, totalCount });
+  const plan = await getShopPlan(shop);
+  const { start, end } = monthRange();
+  const poThisMonth = await prisma.purchaseOrder.count({
+    where: { shop, createdAt: { gte: start, lt: end } },
+  });
+  const limits = getPlanLimits(plan);
+  const canCreate = canCreatePO(plan, poThisMonth);
+  const unlimited = limits.maxPOsPerMonth === Infinity;
+
+  return json({
+    purchaseOrders,
+    totalCount,
+    plan,
+    poThisMonth,
+    monthlyLimit: unlimited ? null : limits.maxPOsPerMonth,
+    unlimited,
+    canCreate,
+  });
 };
 
 export default function PurchaseOrdersPage() {
-  const { purchaseOrders, totalCount } = useLoaderData<typeof loader>();
+  const {
+    purchaseOrders,
+    totalCount,
+    poThisMonth,
+    monthlyLimit,
+    unlimited,
+    canCreate,
+  } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+
+  const showLimitBanner = searchParams.get("limit") === "po" || !canCreate;
+  const dismissBanner = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("limit");
+    setSearchParams(next, { replace: true });
+  };
+
+  const limitBanner = showLimitBanner ? (
+    <UpgradeBanner
+      resource="purchase orders"
+      message={
+        unlimited
+          ? ""
+          : `You've used ${poThisMonth} of ${monthlyLimit} purchase orders this month on your current plan.`
+      }
+      onDismiss={dismissBanner}
+    />
+  ) : null;
+
+  const createButton = canCreate ? (
+    <Link to="/app/purchase-orders/new">
+      <Button variant="primary">Create PO</Button>
+    </Link>
+  ) : (
+    <Link to="/app/settings">
+      <Button variant="primary">Upgrade to add more</Button>
+    </Link>
+  );
 
   const handleStatusFilterChange = useCallback(
     (value: string[]) => setStatusFilter(value),
@@ -68,12 +126,11 @@ export default function PurchaseOrdersPage() {
     return (
       <Page title="Purchase Orders">
         <Layout>
+          {limitBanner ? (
+            <Layout.Section>{limitBanner}</Layout.Section>
+          ) : null}
           <Layout.Section>
-            <InlineStack align="end">
-              <Link to="/app/purchase-orders/new">
-                <Button variant="primary">Create PO</Button>
-              </Link>
-            </InlineStack>
+            <InlineStack align="end">{createButton}</InlineStack>
           </Layout.Section>
           <Layout.Section>
             <Card>
@@ -162,15 +219,16 @@ export default function PurchaseOrdersPage() {
   return (
     <Page
       title="Purchase Orders"
-      subtitle={`${totalCount} total`}
+      subtitle={
+        unlimited
+          ? `${totalCount} total`
+          : `${totalCount} total · ${poThisMonth}/${monthlyLimit} this month`
+      }
     >
       <Layout>
+        {limitBanner ? <Layout.Section>{limitBanner}</Layout.Section> : null}
         <Layout.Section>
-          <InlineStack align="end">
-            <Link to="/app/purchase-orders/new">
-              <Button variant="primary">Create PO</Button>
-            </Link>
-          </InlineStack>
+          <InlineStack align="end">{createButton}</InlineStack>
         </Layout.Section>
         <Layout.Section>
           <Card padding="0">

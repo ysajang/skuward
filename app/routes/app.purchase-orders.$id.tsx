@@ -36,6 +36,9 @@ import {
 } from "../utils/validation";
 import { generatePONumber } from "../utils/po-number";
 import { adjustInventoryOnReceive } from "../utils/shopify-inventory.server";
+import { getShopPlan } from "../utils/billing.server";
+import { canCreatePO } from "../utils/plan-limits";
+import { monthRange } from "../utils/month-range";
 
 interface LineItemDraft {
   shopifyVariantId: string;
@@ -368,6 +371,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const poId = params.id;
 
   if (poId === "new") {
+    // Plan gating: enforce monthly PO quota at creation time only. Existing POs
+    // are always viewable/editable even if a downgrade puts the shop over limit.
+    const plan = await getShopPlan(shop);
+    const { start, end } = monthRange();
+    const poThisMonth = await prisma.purchaseOrder.count({
+      where: { shop, createdAt: { gte: start, lt: end } },
+    });
+    if (!canCreatePO(plan, poThisMonth)) {
+      // Not an error — redirect to the list with an upgrade prompt (conversion).
+      return redirect("/app/purchase-orders?limit=po");
+    }
+
     const poNumber = generatePONumber();
 
     const po = await prisma.purchaseOrder.create({
