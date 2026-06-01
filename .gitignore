@@ -24,3 +24,7 @@ database.sqlite
 # Ignore shopify files created during app dev
 .shopify/*
 .shopify.lock
+# Shopify CLI manages these locally (client_id, scopes, urls) - do not track to avoid conflicts
+shopify.app.toml
+shopify.app.*.toml
+shopify.web.toml

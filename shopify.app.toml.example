@@ -1,0 +1,8 @@
+# REFERENCE ONLY — actual shopify.app.toml is managed locally by Shopify CLI (gitignored)
+# When scopes change, edit your LOCAL shopify.app.toml then run `shopify app deploy`.
+# Required scopes for SKUward (PO receiving + reorder alerts need inventory read/write):
+
+[access_scopes]
+scopes = "read_products,write_products,read_inventory,write_inventory"
+
+# NOTE: read_products and write_products are SEPARATE scopes (write does NOT imply read).
