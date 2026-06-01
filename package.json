@@ -13,6 +13,8 @@
     "docker-start": "npm run setup && npm run start",
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "shopify": "shopify",
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
@@ -36,8 +38,7 @@
     "isbot": "^5.1.0",
     "prisma": "^6.2.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "vite-tsconfig-paths": "^5.0.1"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@remix-run/eslint-config": "^2.16.1",
@@ -51,7 +52,9 @@
     "eslint-config-prettier": "^10.0.1",
     "prettier": "^3.2.4",
     "typescript": "^5.2.2",
-    "vite": "^6.2.2"
+    "vite": "^6.2.2",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^3.2.6"
   },
   "workspaces": [
     "extensions/*"

@@ -1,8 +1,9 @@
 import type { PlanType } from "@prisma/client";
 
-interface PlanLimits {
+export interface PlanLimits {
   maxPOsPerMonth: number;
   maxSuppliers: number;
+  maxReorderRules: number;
   emailAlerts: boolean;
   cogsTracking: boolean;
   marginReport: boolean;
@@ -13,7 +14,8 @@ const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   FREE: {
     maxPOsPerMonth: 5,
     maxSuppliers: 2,
-    emailAlerts: true,
+    maxReorderRules: 3,
+    emailAlerts: false,
     cogsTracking: false,
     marginReport: false,
     csvExport: false,
@@ -21,7 +23,8 @@ const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   STARTER: {
     maxPOsPerMonth: Infinity,
     maxSuppliers: 10,
-    emailAlerts: true,
+    maxReorderRules: Infinity,
+    emailAlerts: false,
     cogsTracking: true,
     marginReport: false,
     csvExport: false,
@@ -29,6 +32,7 @@ const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
   PRO: {
     maxPOsPerMonth: Infinity,
     maxSuppliers: Infinity,
+    maxReorderRules: Infinity,
     emailAlerts: true,
     cogsTracking: true,
     marginReport: true,
@@ -44,14 +48,23 @@ export function canCreatePO(
   plan: PlanType,
   currentMonthPOCount: number,
 ): boolean {
-  const limits = getPlanLimits(plan);
-  return currentMonthPOCount < limits.maxPOsPerMonth;
+  return currentMonthPOCount < getPlanLimits(plan).maxPOsPerMonth;
 }
 
 export function canCreateSupplier(
   plan: PlanType,
   currentSupplierCount: number,
 ): boolean {
-  const limits = getPlanLimits(plan);
-  return currentSupplierCount < limits.maxSuppliers;
+  return currentSupplierCount < getPlanLimits(plan).maxSuppliers;
+}
+
+export function canCreateReorderRule(
+  plan: PlanType,
+  currentReorderRuleCount: number,
+): boolean {
+  return currentReorderRuleCount < getPlanLimits(plan).maxReorderRules;
+}
+
+export function canAccessCOGS(plan: PlanType): boolean {
+  return getPlanLimits(plan).cogsTracking;
 }
