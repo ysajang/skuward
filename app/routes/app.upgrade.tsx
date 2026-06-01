@@ -7,7 +7,7 @@ import {
   type BillingPlanName,
   buildReturnUrl,
   isDevStore,
-} from "../utils/billing.server";
+} from "../utils/billing-plans";
 
 // Plan changes must be POST. A GET here just bounces back to settings.
 export const loader = async ({ request }: LoaderFunctionArgs) => {

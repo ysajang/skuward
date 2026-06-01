@@ -7,7 +7,7 @@ import {
   resolvePlanFromSubscriptions,
   buildReturnUrl,
   isDevStore,
-} from "./billing.server";
+} from "./billing-plans";
 
 describe("planNameToPlanType", () => {
   it("maps known plan names to PlanType", () => {

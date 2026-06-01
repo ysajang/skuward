@@ -16,13 +16,13 @@ import {
 } from "@shopify/polaris";
 
 import { authenticate } from "../shopify.server";
+import { getShopPlan } from "../utils/billing.server";
 import {
-  getShopPlan,
   BILLING_PLANS,
   STARTER_PLAN,
   PRO_PLAN,
   type BillingPlanName,
-} from "../utils/billing.server";
+} from "../utils/billing-plans";
 import type { PlanType } from "@prisma/client";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {

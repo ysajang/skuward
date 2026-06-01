@@ -11,7 +11,7 @@ import {
   BILLING_PLANS,
   STARTER_PLAN,
   PRO_PLAN,
-} from "./utils/billing.server";
+} from "./utils/billing-plans";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
