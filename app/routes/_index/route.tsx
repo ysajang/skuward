@@ -22,9 +22,13 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>
+          SKUward — Inventory &amp; Purchase Orders for Shopify
+        </h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Create purchase orders, track suppliers, get low-stock reorder
+          alerts, and see profit margins — all inside your Shopify admin. A
+          simple, modern home for the inventory work you used to do in Stocky.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -40,16 +44,17 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Purchase orders that update stock</strong>. Draft, send, and
+            receive POs. Inventory in Shopify updates automatically when stock
+            arrives.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Reorder alerts</strong>. Set minimum stock levels per
+            product and get flagged the moment inventory runs low.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Cost &amp; margin tracking</strong>. Record cost of goods on
+            every receipt and see live profit margins pulled from your catalog.
           </li>
         </ul>
       </div>
