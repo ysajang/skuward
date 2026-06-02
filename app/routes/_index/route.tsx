@@ -28,7 +28,7 @@ export default function App() {
         <p className={styles.text}>
           Create purchase orders, track suppliers, get low-stock reorder
           alerts, and see profit margins — all inside your Shopify admin. A
-          simple, modern home for the inventory work you used to do in Stocky.
+          simple, modern home for your day-to-day inventory work.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
