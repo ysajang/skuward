@@ -5,17 +5,20 @@ EXPOSE 3000
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-
+# Install ALL deps (incl. devDependencies) — build needs vite, vite-tsconfig-paths, etc.
 COPY package.json package-lock.json* ./
+RUN npm ci && npm cache clean --force
 
-RUN npm ci --omit=dev && npm cache clean --force
 # Remove CLI packages since we don't need them in production by default.
-# Remove this line if you want to run CLI commands in your container.
 RUN npm remove @shopify/cli
 
 COPY . .
 
 RUN npm run build
+
+# Drop devDependencies after build to slim the runtime image.
+RUN npm prune --omit=dev
+
+ENV NODE_ENV=production
 
 CMD ["npm", "run", "docker-start"]
