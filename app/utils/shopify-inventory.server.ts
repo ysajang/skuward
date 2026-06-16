@@ -1,3 +1,4 @@
+import type { SkuMatch, SkuMatchMap } from "./csv-import-preview";
 /**
  * Shopify Inventory GraphQL utilities
  * Handles inventory adjustments when receiving PO line items
@@ -323,4 +324,100 @@ export async function adjustInventoryOnReceive(
       errors: [`Shopify API error: ${err.message || "Unknown error"}`],
     };
   }
+}
+
+// ----------------------------------------------------------------------------
+// SKU -> variant matching (for CSV PO import)
+// ----------------------------------------------------------------------------
+
+
+/** Escape a SKU value for use inside a Shopify search query string literal. */
+function escapeSkuForQuery(sku: string): string {
+  // wrap in single quotes; escape backslash and single quote
+  return `'${sku.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+/**
+ * Look up Shopify variants by SKU for a list of distinct SKUs.
+ * Returns a map sku -> SkuMatch:
+ *   - matched   : exactly one variant has this SKU
+ *   - unmatched : no variant
+ *   - ambiguous : 2+ variants share this SKU (Shopify does not enforce uniqueness)
+ *
+ * Batches SKUs into OR queries to avoid per-SKU round trips and rate limits.
+ * Paginates within each batch in case many variants match.
+ */
+export async function matchSkusToVariants(
+  admin: any,
+  skus: string[],
+): Promise<SkuMatchMap> {
+  const result: SkuMatchMap = {};
+  const distinct = Array.from(new Set(skus.filter((s) => s && s.trim() !== "")));
+  if (distinct.length === 0) return result;
+
+  // count variants found per sku across the whole run
+  const counts: Record<string, { variantId: string; productId: string; n: number }> = {};
+  for (const s of distinct) counts[s] = { variantId: "", productId: "", n: 0 };
+
+  const BATCH = 40; // SKUs per OR-query (keeps query cost in check)
+  for (let i = 0; i < distinct.length; i += BATCH) {
+    const batch = distinct.slice(i, i + BATCH);
+    const queryStr = batch.map((s) => `sku:${escapeSkuForQuery(s)}`).join(" OR ");
+
+    let cursor: string | null = null;
+    // paginate this batch's matches
+    for (let page = 0; page < 25; page++) {
+      const response: any = await admin.graphql(
+        `#graphql
+        query MatchSkus($q: String!, $after: String) {
+          productVariants(first: 250, query: $q, after: $after) {
+            edges {
+              cursor
+              node {
+                id
+                sku
+                product { id }
+              }
+            }
+            pageInfo { hasNextPage }
+          }
+        }`,
+        { variables: { q: queryStr, after: cursor } },
+      );
+
+      const data = await response.json();
+      const conn = data?.data?.productVariants;
+      const edges = conn?.edges || [];
+
+      for (const edge of edges) {
+        const node = edge?.node;
+        const sku = node?.sku;
+        if (!sku || !(sku in counts)) continue; // ignore partial/fuzzy hits
+        const entry = counts[sku];
+        entry.n += 1;
+        if (entry.n === 1) {
+          entry.variantId = node.id;
+          entry.productId = node.product?.id || "";
+        }
+      }
+
+      if (conn?.pageInfo?.hasNextPage) {
+        cursor = edges[edges.length - 1]?.cursor || null;
+        if (!cursor) break;
+      } else {
+        break;
+      }
+    }
+  }
+
+  for (const s of distinct) {
+    const c = counts[s];
+    let match: SkuMatch;
+    if (c.n === 0) match = { kind: "unmatched" };
+    else if (c.n === 1) match = { kind: "matched", variantId: c.variantId, productId: c.productId };
+    else match = { kind: "ambiguous", count: c.n };
+    result[s] = match;
+  }
+
+  return result;
 }
