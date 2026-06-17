@@ -40,6 +40,7 @@ export default function App() {
           Dashboard
         </Link>
         <Link to="/app/purchase-orders">Purchase Orders</Link>
+        <Link to="/app/import">Import CSV</Link>
         <Link to="/app/suppliers">Suppliers</Link>
         <Link to="/app/reorder-rules">Reorder Rules</Link>
         <Link to="/app/cogs">Cost & Margins</Link>
