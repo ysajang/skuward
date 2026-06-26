@@ -102,7 +102,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (e instanceof CsvEmptyError || e instanceof CsvTooLargeError) {
       return json<ActionResponse>({ step: "error", error: e.message }, { status: 400 });
     }
-    return json<ActionResponse>({ step: "error", error: "CSV를 읽지 못했습니다" }, { status: 400 });
+    return json<ActionResponse>({ step: "error", error: "Could not read the CSV file." }, { status: 400 });
   }
 
   // If no mapping posted yet, auto-guess for the first preview pass.
@@ -145,7 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json<ActionResponse>({ step: "locked" }, { status: 402 });
       }
       return json<ActionResponse>(
-        { step: "error", error: "가져오기 중 오류가 발생했습니다. 다시 시도해주세요." },
+        { step: "error", error: "Something went wrong during import. Please try again." },
         { status: 500 },
       );
     }
@@ -220,35 +220,34 @@ export default function ImportRoute() {
   if (actionData?.step === "done") {
     const r = actionData.result;
     return (
-      <Page title="가져오기 완료" backAction={{ url: "/app/purchase-orders" }}>
+      <Page title="Import complete" backAction={{ url: "/app/purchase-orders" }}>
         <Layout>
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
-                <Banner tone="success" title="발주 가져오기가 완료되었습니다">
+                <Banner tone="success" title="Purchase orders imported successfully">
                   <p>
-                    {r.createdPOCount}개의 발주서와 {r.createdLineItemCount}개의 품목을
-                    생성했습니다.
+                    Created {r.createdPOCount} purchase orders and {r.createdLineItemCount} line items.
                   </p>
                 </Banner>
                 <List>
-                  <List.Item>신규 공급사 {r.createdSupplierCount}개 / 기존 재사용 {r.reusedSupplierCount}개</List.Item>
-                  <List.Item>반영 금액 합계: {r.includedAmountTotal.toLocaleString()}</List.Item>
+                  <List.Item>New suppliers created: {r.createdSupplierCount} / existing reused: {r.reusedSupplierCount}</List.Item>
+                  <List.Item>Included amount total: {r.includedAmountTotal.toLocaleString()}</List.Item>
                   {r.excludedLineCount > 0 && (
                     <List.Item>
-                      제외된 품목 {r.excludedLineCount}개 (Shopify에 없는 SKU) — 제외 금액{" "}
+                      Excluded line items: {r.excludedLineCount} (SKUs not found in Shopify) — excluded amount{" "}
                       {r.excludedAmountTotal.toLocaleString()}
                     </List.Item>
                   )}
                   {r.skippedExistingPONumbers.length > 0 && (
                     <List.Item>
-                      이미 존재해 건너뛴 PO번호: {r.skippedExistingPONumbers.join(", ")}
+                      Skipped existing PO numbers: {r.skippedExistingPONumbers.join(", ")}
                     </List.Item>
                   )}
                 </List>
                 <InlineStack align="end">
                   <Button variant="primary" url="/app/purchase-orders">
-                    발주서 목록 보기
+                    View purchase orders
                   </Button>
                 </InlineStack>
               </BlockStack>
@@ -263,19 +262,19 @@ export default function ImportRoute() {
   const missing = preview ? missingRequiredFields(preview.mapping) : [];
 
   return (
-    <Page title="발주서 CSV 가져오기" backAction={{ url: "/app/purchase-orders" }}>
+    <Page title="Import purchase orders from CSV" backAction={{ url: "/app/purchase-orders" }}>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
             {actionData?.step === "error" && (
-              <Banner tone="critical" title="가져오기 오류">
+              <Banner tone="critical" title="Import error">
                 <p>{actionData.error}</p>
               </Banner>
             )}
             {actionData?.step === "locked" && (
               <UpgradeBanner
-                resource="가져오기"
-                message="CSV 가져오기는 Starter 플랜부터 사용할 수 있습니다. 미리보기로 결과를 먼저 확인하고 업그레이드하세요."
+                resource="imports"
+                message="CSV import is available on the Starter plan and above. Preview your results first, then upgrade to create these purchase orders."
                 to="/app/settings"
               />
             )}
@@ -284,22 +283,23 @@ export default function ImportRoute() {
             <Card>
               <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">
-                  1. CSV 파일 업로드
+                  1. Upload CSV file
                 </Text>
                 <Text as="p" tone="subdued">
-                  Stocky 등에서 내보낸 발주 CSV를 올리세요. 헤더(첫 행)가 포함되어야 합니다.
-                  같은 PO번호의 여러 행은 하나의 발주서로 묶입니다.
+                  Upload a purchase order CSV exported from your previous inventory tool. The
+                  first row must contain headers. Rows that share the same PO number are
+                  grouped into a single purchase order.
                 </Text>
                 <DropZone accept=".csv,text/csv" type="file" allowMultiple={false} onDrop={handleDrop}>
                   {fileName ? (
                     <Box padding="400">
                       <InlineStack gap="200" blockAlign="center">
-                        <Badge tone="success">선택됨</Badge>
+                        <Badge tone="success">Selected</Badge>
                         <Text as="span">{fileName}</Text>
                       </InlineStack>
                     </Box>
                   ) : (
-                    <DropZone.FileUpload actionTitle="파일 선택" actionHint=".csv 파일만" />
+                    <DropZone.FileUpload actionTitle="Select file" actionHint=".csv files only" />
                   )}
                 </DropZone>
                 <InlineStack align="end">
@@ -309,7 +309,7 @@ export default function ImportRoute() {
                     loading={busy && !preview}
                     onClick={() => runPreview()}
                   >
-                    분석하기
+                    Analyze
                   </Button>
                 </InlineStack>
               </BlockStack>
@@ -320,10 +320,10 @@ export default function ImportRoute() {
               <Card>
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">
-                    2. 컬럼 매핑
+                    2. Column mapping
                   </Text>
                   <Text as="p" tone="subdued">
-                    각 SKUward 항목에 CSV 컬럼을 연결하세요. * 표시는 필수입니다.
+                    Map each SKUward field to a column in your CSV. Fields marked * are required.
                   </Text>
                   <MappingEditor
                     headers={preview.headers}
@@ -332,8 +332,8 @@ export default function ImportRoute() {
                     onApply={(m) => runPreview(m)}
                   />
                   {missing.length > 0 && (
-                    <Banner tone="warning" title="필수 항목이 매핑되지 않았습니다">
-                      <p>{missing.map((f) => FIELD_LABELS[f]).join(", ")}를 연결한 뒤 다시 분석하세요.</p>
+                    <Banner tone="warning" title="Required fields are not mapped">
+                      <p>Map {missing.map((f) => FIELD_LABELS[f]).join(", ")}, then analyze again.</p>
                     </Banner>
                   )}
                 </BlockStack>
@@ -345,51 +345,52 @@ export default function ImportRoute() {
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    3. 미리보기
+                    3. Preview
                   </Text>
 
                   {preview.truncated && (
                     <Banner tone="warning">
-                      <p>행 수가 많아 일부만 처리됩니다(상한 적용).</p>
+                      <p>The file has many rows, so only part of it is processed (row limit applied).</p>
                     </Banner>
                   )}
 
                   <DataTable
                     columnContentTypes={["text", "numeric"]}
-                    headings={["항목", "값"]}
+                    headings={["Item", "Value"]}
                     rows={[
-                      ["생성될 발주서", String(preview.summary.creatablePOCount)],
-                      ["매칭된 품목", String(preview.summary.totalMatchedLines)],
+                      ["Purchase orders to create", String(preview.summary.creatablePOCount)],
+                      ["Matched line items", String(preview.summary.totalMatchedLines)],
                       [
-                        "제외 품목 (미매칭 SKU)",
+                        "Excluded (SKU not found)",
                         String(preview.summary.totalUnmatchedLines),
                       ],
                       [
-                        "제외 품목 (중복 SKU·모호)",
+                        "Excluded (duplicate / ambiguous SKU)",
                         String(preview.summary.totalAmbiguousLines),
                       ],
-                      ["신규 생성 공급사", String(preview.summary.vendorsToEnsure.length)],
-                      ["반영 금액", preview.summary.includedAmountTotal.toLocaleString()],
-                      ["제외 금액", preview.summary.excludedAmountTotal.toLocaleString()],
+                      ["New suppliers to create", String(preview.summary.vendorsToEnsure.length)],
+                      ["Included amount", preview.summary.includedAmountTotal.toLocaleString()],
+                      ["Excluded amount", preview.summary.excludedAmountTotal.toLocaleString()],
                     ]}
                   />
 
                   {(preview.summary.totalUnmatchedLines > 0 ||
                     preview.summary.totalAmbiguousLines > 0) && (
-                    <Banner tone="info" title="일부 품목은 제외됩니다">
+                    <Banner tone="info" title="Some line items will be excluded">
                       <p>
-                        Shopify 상품에 없는 SKU 또는 동일 SKU가 여러 개인 품목은 발주서에 포함되지
-                        않습니다. 위 "제외 금액"으로 원본과의 차이를 확인하세요.
+                        Line items whose SKU is not found in Shopify, or whose SKU matches more
+                        than one product, are not included in the purchase orders. Use the
+                        "Excluded amount" above to compare against your source file.
                       </p>
                     </Banner>
                   )}
 
                   {preview.rowErrors.length > 0 && (
-                    <Banner tone="warning" title={`형식 오류 행 ${preview.rowErrors.length}개`}>
+                    <Banner tone="warning" title={`${preview.rowErrors.length} rows with formatting errors`}>
                       <List>
                         {preview.rowErrors.slice(0, 8).map((e) => (
                           <List.Item key={e.rowIndex}>
-                            {e.rowIndex + 2}행: {e.reason}
+                            Row {e.rowIndex + 2}: {e.reason}
                           </List.Item>
                         ))}
                       </List>
@@ -397,13 +398,13 @@ export default function ImportRoute() {
                   )}
 
                   {preview.summary.creatablePOCount === 0 ? (
-                    <Banner tone="critical" title="생성할 발주서가 없습니다">
-                      <p>매칭된 SKU가 없습니다. SKU 컬럼 매핑과 Shopify 상품의 SKU를 확인하세요.</p>
+                    <Banner tone="critical" title="No purchase orders to create">
+                      <p>No SKUs matched. Check the SKU column mapping and the SKUs on your Shopify products.</p>
                     </Banner>
                   ) : !canCommit ? (
                     <UpgradeBanner
-                      resource="가져오기"
-                      message="결과를 확인했습니다. Starter 플랜으로 업그레이드하면 이 발주서를 한 번에 생성합니다."
+                      resource="imports"
+                      message="You've reviewed the results. Upgrade to the Starter plan to create these purchase orders in one step."
                       to="/app/settings"
                     />
                   ) : (
@@ -439,7 +440,7 @@ function MappingEditor({
   const [mapping, setMapping] = useState<ColumnMapping>(initialMapping);
 
   const headerOptions = useMemo(
-    () => [{ label: "— 선택 안 함 —", value: "ignore" }, ...headers.map((h) => ({ label: h, value: h }))],
+    () => [{ label: "— None —", value: "ignore" }, ...headers.map((h) => ({ label: h, value: h }))],
     [headers],
   );
 
@@ -472,7 +473,7 @@ function MappingEditor({
       ))}
       <InlineStack align="end">
         <Button disabled={busy} loading={busy} onClick={() => onApply(mapping)}>
-          매핑 적용 후 다시 분석
+          Apply mapping and analyze
         </Button>
       </InlineStack>
     </BlockStack>
@@ -500,7 +501,7 @@ function ConfirmButton({
   };
   return (
     <Button variant="primary" tone="success" disabled={busy} loading={busy} onClick={onConfirm}>
-      발주서 생성하기
+      Create purchase orders
     </Button>
   );
 }
