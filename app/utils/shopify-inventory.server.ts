@@ -7,6 +7,8 @@ import type { SkuMatch, SkuMatchMap } from "./csv-import-preview";
 interface VariantInventoryInfo {
   inventoryItemId: string;
   locationId: string;
+  /** Current "available" quantity at the location; null if untracked. */
+  currentAvailable: number | null;
 }
 
 interface AdjustmentResult {
@@ -45,6 +47,10 @@ async function getVariantInventoryInfo(
                 location {
                   id
                 }
+                quantities(names: ["available"]) {
+                  name
+                  quantity
+                }
               }
             }
           }
@@ -61,9 +67,16 @@ async function getVariantInventoryInfo(
   const firstLevel = inventoryItem.inventoryLevels?.edges?.[0]?.node;
   if (!firstLevel?.location?.id) return null;
 
+  const availableEntry = (firstLevel.quantities ?? []).find(
+    (q: { name: string; quantity: number }) => q.name === "available",
+  );
+  const currentAvailable =
+    typeof availableEntry?.quantity === "number" ? availableEntry.quantity : null;
+
   return {
     inventoryItemId: inventoryItem.id,
     locationId: firstLevel.location.id,
+    currentAvailable,
   };
 }
 
@@ -245,6 +258,7 @@ export async function adjustInventoryOnReceive(
     delta: number;
     inventoryItemId: string;
     locationId: string;
+    changeFromQuantity?: number;
   }> = [];
 
   for (const adj of adjustments) {
@@ -260,11 +274,22 @@ export async function adjustInventoryOnReceive(
       continue;
     }
 
-    changes.push({
+    const change: {
+      delta: number;
+      inventoryItemId: string;
+      locationId: string;
+      changeFromQuantity?: number;
+    } = {
       delta: adj.deltaQuantity,
       inventoryItemId: info.inventoryItemId,
       locationId: info.locationId,
-    });
+    };
+    // API 2026-04+ requires the expected current quantity for optimistic
+    // concurrency. Only set it when the item is actually tracked.
+    if (info.currentAvailable !== null) {
+      change.changeFromQuantity = info.currentAvailable;
+    }
+    changes.push(change);
   }
 
   if (changes.length === 0) {
