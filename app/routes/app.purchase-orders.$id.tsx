@@ -34,6 +34,7 @@ import {
   parseIntSafe,
   parseDecimalSafe,
 } from "../utils/validation";
+import { randomUUID } from "node:crypto";
 import { generatePONumber } from "../utils/po-number";
 import { adjustInventoryOnReceive } from "../utils/shopify-inventory.server";
 import { getShopPlan } from "../utils/billing.server";
@@ -200,12 +201,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     // 1) Adjust Shopify inventory
+    // API 2026-04 requires an idempotency key on inventoryAdjustQuantities.
+    // One key per receive request: SDK retries of the same request are
+    // deduped by Shopify, while a deliberate later receive gets a new key.
     const inventoryResult = await adjustInventoryOnReceive(
       admin,
       adjustments.map((a) => ({
         variantId: a.variantId,
         deltaQuantity: a.deltaQuantity,
       })),
+      randomUUID(),
     );
 
     if (!inventoryResult.success) {

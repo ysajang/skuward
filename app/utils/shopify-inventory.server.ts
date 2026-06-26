@@ -250,6 +250,7 @@ export async function adjustInventoryOnReceive(
     variantId: string;
     deltaQuantity: number;
   }>,
+  idempotencyKey: string,
 ): Promise<AdjustmentResult> {
   const errors: string[] = [];
 
@@ -303,8 +304,8 @@ export async function adjustInventoryOnReceive(
   try {
     const response = await admin.graphql(
       `#graphql
-      mutation InventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
-        inventoryAdjustQuantities(input: $input) {
+      mutation InventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!, $idempotencyKey: String!) {
+        inventoryAdjustQuantities(input: $input) @idempotent(key: $idempotencyKey) {
           userErrors {
             field
             message
@@ -327,6 +328,7 @@ export async function adjustInventoryOnReceive(
             referenceDocumentUri: "logistics://skuward/po-receiving",
             changes,
           },
+          idempotencyKey,
         },
       },
     );
