@@ -293,23 +293,23 @@ export function groupRowsIntoPOs(
 
     // required-field validation
     if (!poNumber) {
-      rowErrors.push({ rowIndex, reason: "PO 번호 누락" });
+      rowErrors.push({ rowIndex, reason: "Missing PO number" });
       return;
     }
     if (!vendor) {
-      rowErrors.push({ rowIndex, reason: "공급사명 누락" });
+      rowErrors.push({ rowIndex, reason: "Missing supplier name" });
       return;
     }
     if (!sku) {
-      rowErrors.push({ rowIndex, reason: "SKU 누락" });
+      rowErrors.push({ rowIndex, reason: "Missing SKU" });
       return;
     }
     if (quantity === null || quantity <= 0) {
-      rowErrors.push({ rowIndex, reason: "수량이 유효하지 않음" });
+      rowErrors.push({ rowIndex, reason: "Invalid quantity" });
       return;
     }
     if (cost === null) {
-      rowErrors.push({ rowIndex, reason: "단가가 유효하지 않음" });
+      rowErrors.push({ rowIndex, reason: "Invalid unit cost" });
       return;
     }
 
