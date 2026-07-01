@@ -2,10 +2,10 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 
 import { authenticate } from "../shopify.server";
+import { shouldUseTestCharge } from "../utils/billing.server";
 import {
   PAID_PLAN_NAMES,
   type BillingPlanName,
-  isDevStore,
 } from "../utils/billing-plans";
 
 // Plan changes must be POST. A GET here just bounces back to settings.
@@ -15,7 +15,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, session, admin } = await authenticate.admin(request);
 
   const formData = await request.formData();
   const plan = String(formData.get("plan") ?? "");
@@ -35,9 +35,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // The SDK types `plan` as keyof the billing config; that generic resolves to
   // `never` at this call site (known SDK inference limitation), so we cast at
   // this single boundary. Runtime is verified working (Starter/Pro live tests).
+  // Test charges for partner development stores (incl. App Store reviewers,
+  // who cannot complete real charges) — detected dynamically, never by domain.
+  const isTest = await shouldUseTestCharge(admin, session.shop);
+
   await billing.request({
     plan,
-    isTest: isDevStore(session.shop),
+    isTest,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 

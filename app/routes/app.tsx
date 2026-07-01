@@ -7,7 +7,6 @@ import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
 import { syncShopPlan } from "../utils/billing.server";
-import { isDevStore } from "../utils/billing-plans";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
@@ -22,7 +21,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // minimal BillingLike; cast at this single boundary. syncShopPlan only calls
     // .check and is runtime-verified.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await syncShopPlan(billing as any, session.shop, isDevStore(session.shop));
+    await syncShopPlan(billing as any, session.shop);
   } catch (error) {
     console.error("[billing] syncShopPlan failed:", error);
   }
